@@ -50,13 +50,11 @@ export default function PageShell({
   const secondaryOrb = orbTint === "rose" ? "amber" : "rose";
   const intensity = intensityMap[orbIntensity];
 
-  // 全局鼠标追踪 — spring 缓动，覆盖整个视口
   const rawX = useMotionValue(0.5);
   const rawY = useMotionValue(0.5);
   const mouseX = useSpring(rawX, { stiffness: 120, damping: 24 });
   const mouseY = useSpring(rawY, { stiffness: 120, damping: 24 });
 
-  // 光球视差偏移量（-20px ~ 20px）
   const orbDx = useTransform(mouseX, [0, 1], [20, -20]);
   const orbDy = useTransform(mouseY, [0, 1], [16, -16]);
   const orb2Dx = useTransform(mouseX, [0, 1], [-14, 14]);
@@ -71,7 +69,6 @@ export default function PageShell({
     return () => window.removeEventListener("mousemove", onMove);
   }, [rawX, rawY]);
 
-  // 将鼠标位置写入 CSS 变量，供光标柔光层和子组件使用
   useMotionValueEvent(mouseX, "change", (v) => {
     if (shellRef.current) {
       shellRef.current.style.setProperty("--cursor-x", `${v * 100}%`);
