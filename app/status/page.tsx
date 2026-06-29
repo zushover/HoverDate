@@ -2,7 +2,6 @@
 
 import { useState, useEffect } from "react";
 import { motion, AnimatePresence } from "framer-motion";
-import { getSubmissionByEmail } from "@/lib/db";
 import Link from "next/link";
 import PageShell from "@/components/PageShell";
 
@@ -26,7 +25,7 @@ function getCanResubmit(): boolean {
   return true;
 }
 
-type Status = "idle" | "not_found" | "submitted" | "error";
+type Status = "idle" | "not_found" | "submitted" | "matched" | "error";
 
 function CountdownRing({ progress }: { progress: number }) {
   const circumference = 2 * Math.PI * 40;
@@ -102,11 +101,17 @@ export default function StatusPage() {
     setStatus("idle");
 
     try {
-      const row = await getSubmissionByEmail(email.trim());
+      const res = await fetch(`/api/status?email=${encodeURIComponent(email.trim())}`);
+      const json = await res.json();
 
-      if (!row) {
+      if (json.status === "not_found") {
         setStatus("not_found");
-      } else {
+      } else if (json.status === "matched") {
+        setStatus("matched");
+        localStorage.setItem("hoverdate_email", email.trim());
+        localStorage.setItem("hoverdate_submitted", "true");
+        localStorage.setItem("hoverdate_matched", "true");
+      } else if (json.status === "submitted") {
         setStatus("submitted");
         localStorage.setItem("hoverdate_email", email.trim());
         localStorage.setItem("hoverdate_submitted", "true");
@@ -253,6 +258,44 @@ export default function StatusPage() {
                   </svg>
                 </Link>
               )}
+            </motion.div>
+          )}
+
+          {status === "matched" && (
+            <motion.div
+              key="matched"
+              initial={{ opacity: 0, y: 12 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0 }}
+              className="bg-white/[0.04] backdrop-blur-2xl border border-rose-400/[0.15] rounded-2xl p-8 space-y-8"
+            >
+              <div className="text-center space-y-6">
+                <div className="inline-flex items-center gap-2.5 px-4 py-2 rounded-full bg-rose-400/[0.12] border border-rose-400/[0.25]">
+                  <span className="relative flex h-2 w-2">
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-400" />
+                  </span>
+                  <span className="text-xs text-rose-300 font-medium tracking-wide">匹配已完成</span>
+                </div>
+
+                <div className="space-y-1">
+                  <p className="text-xs text-zinc-500">匹配邮箱</p>
+                  <p className="text-base font-semibold text-white font-mono">{email}</p>
+                </div>
+
+                <div className="p-5 rounded-xl bg-rose-400/[0.04] border border-rose-400/[0.1] text-center space-y-4">
+                  <p className="text-lg text-zinc-200">你的匹配结果已准备就绪</p>
+                  <p className="text-sm text-rose-300/60 font-light">本周匹配已掉落，48 小时内有效</p>
+                  <Link
+                    href={`/result?email=${encodeURIComponent(email)}`}
+                    className="inline-flex items-center gap-2 px-8 py-3 rounded-full bg-gradient-to-r from-rose-400 to-pink-400 text-white font-bold text-sm hover:opacity-90 active:scale-[0.97] transition-all shadow-[0_0_20px_rgba(251,113,133,0.25)]"
+                  >
+                    查看匹配结果
+                    <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
+                    </svg>
+                  </Link>
+                </div>
+              </div>
             </motion.div>
           )}
         </AnimatePresence>

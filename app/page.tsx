@@ -452,12 +452,20 @@ export default function Home() {
                       className="flex-1 px-5 py-3 rounded-xl bg-white/[0.05] border border-white/[0.1] text-sm focus:outline-none focus:border-rose-400/50 placeholder:text-zinc-500 transition-all"
                     />
                     <button
-                      onClick={() => {
+                      onClick={async () => {
                         const input = document.getElementById("school-name") as HTMLInputElement;
                         if (input?.value.trim()) {
+                          const schoolName = input.value.trim();
                           input.value = "";
                           input.placeholder = "已收到！我们会尽快处理";
                           setTimeout(() => { input.placeholder = "输入你的学校全名"; }, 3000);
+                          try {
+                            await fetch("/api/school-request", {
+                              method: "POST",
+                              headers: { "Content-Type": "application/json" },
+                              body: JSON.stringify({ schoolName }),
+                            });
+                          } catch {}
                         }
                       }}
                       className="px-6 py-3 rounded-xl bg-white/5 border border-white/10 text-sm text-zinc-300 hover:text-white hover:bg-white/10 hover:border-white/20 active:scale-[0.98] transition-all flex-shrink-0"

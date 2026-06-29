@@ -1,8 +1,24 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { motion, AnimatePresence, useSpring, useTransform } from "framer-motion";
+import { useSearchParams } from "next/navigation";
 import PageShell from "@/components/PageShell";
+
+interface MatchResult {
+  status: string;
+  matchId: string;
+  score: number;
+  dimensions: {
+    identity: number;
+    lifestyle: number;
+    interests: number;
+    inner: number;
+    future: number;
+  };
+  myAction: string | null;
+  partnerEmail: string | null;
+}
 
 function getNextTuesday(): string {
   const now = new Date();
@@ -10,20 +26,6 @@ function getNextTuesday(): string {
   nextTue.setDate(now.getDate() + ((2 + 7 - now.getDay()) % 7 || 7));
   return `${nextTue.getFullYear()}.${String(nextTue.getMonth() + 1).padStart(2, "0")}.${String(nextTue.getDate()).padStart(2, "0")}`;
 }
-
-const DIMENSIONS = [
-  { label: "基础画像", score: 88, key: "identity" },
-  { label: "生活共振", score: 94, key: "lifestyle" },
-  { label: "内心世界", score: 91, key: "inner" },
-  { label: "关系模式", score: 85, key: "relation" },
-  { label: "未来拼图", score: 82, key: "future" },
-];
-
-const INSIGHTS: Record<string, string> = {
-  lifestyle: "你们在生活节奏上高度同频——都属于夜猫子型，周末喜欢宅，这意味着相处时的摩擦成本很低",
-  inner: "你们看待世界的方式很相似，在消费观和压力应对上尤其合拍",
-  identity: "基础画像匹配度很高，你们的校园生活和日常圈层有大量交集",
-};
 
 function AnimatedNumber({ value, duration = 1.5 }: { value: number; duration?: number }) {
   const spring = useSpring(0, { stiffness: 80, damping: 20, duration: duration * 1000 });
@@ -36,21 +38,103 @@ function AnimatedNumber({ value, duration = 1.5 }: { value: number; duration?: n
   return <motion.span>{display}</motion.span>;
 }
 
+const DIMENSION_META = [
+  { label: "基础画像", key: "identity" },
+  { label: "生活共振", key: "lifestyle" },
+  { label: "兴趣图谱", key: "interests" },
+  { label: "内心世界", key: "inner" },
+  { label: "未来拼图", key: "future" },
+] as const;
+
+const INSIGHT_MAP: Record<string, string> = {
+  identity: "你们的校园生活和日常圈层有大量交集，基础画像匹配度很高",
+  lifestyle: "你们在生活节奏上高度同频，作息和社交偏好契合，相处时的摩擦成本很低",
+  interests: "你们的兴趣图谱高度重合，有共同的话题和娱乐方式",
+  inner: "你们看待世界的方式很相似，在价值观和底层逻辑上非常合拍",
+  future: "你们对未来的规划方向一致，这是长期关系的重要基础",
+};
+
 export default function ResultPage() {
+  const searchParams = useSearchParams();
+  const emailFromQuery = searchParams.get("email") || (typeof window !== "undefined" ? localStorage.getItem("hoverdate_email") : null);
+
   const [revealed, setRevealed] = useState(false);
   const [tearing, setTearing] = useState(false);
   const [action, setAction] = useState<"none" | "connect" | "pass">("none");
   const [showEasterEgg, setShowEasterEgg] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [matchData, setMatchData] = useState<MatchResult | null>(null);
+  const [mutual, setMutual] = useState(false);
   const holdTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const nextTuesday = getNextTuesday();
+
+  const fetchMatch = useCallback(async () => {
+    if (!emailFromQuery) return;
+    setLoading(true);
+    setError("");
+    try {
+      const res = await fetch(`/api/match?email=${encodeURIComponent(emailFromQuery)}`);
+      const json = await res.json();
+      if (json.status === "ok") {
+        setMatchData(json);
+        if (json.myAction === "connect") setAction("connect");
+        else if (json.myAction === "pass") setAction("pass");
+        if (json.partnerEmail) setMutual(true);
+      } else if (json.status === "not_yet" || json.status === "not_matched") {
+        setError("匹配结果尚未生成，请周二晚 9:00 后查看");
+      } else {
+        setError("未找到匹配结果");
+      }
+    } catch {
+      setError("获取匹配结果失败，请稍后重试");
+    } finally {
+      setLoading(false);
+    }
+  }, [emailFromQuery]);
+
+  useEffect(() => {
+    if (revealed) fetchMatch();
+  }, [revealed, fetchMatch]);
 
   const handleReveal = () => {
     setTearing(true);
     setTimeout(() => setRevealed(true), 600);
   };
 
-  const topInsight = DIMENSIONS.sort((a, b) => b.score - a.score)[0];
-  const insightText = INSIGHTS[topInsight.key] || "算法在 5 个维度上找到了你们的共鸣点";
+  const handleAction = async (act: "connect" | "pass") => {
+    if (!matchData || action !== "none") return;
+    setAction(act);
+    try {
+      const res = await fetch("/api/match/action", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          email: emailFromQuery,
+          matchId: matchData.matchId,
+          action: act,
+        }),
+      });
+      const json = await res.json();
+      if (json.mutual) setMutual(true);
+      if (act === "connect") {
+        localStorage.setItem("hoverdate_matched", "true");
+      }
+    } catch {
+      setAction("none");
+    }
+  };
+
+  const dimensions = matchData
+    ? DIMENSION_META.map((m) => ({ label: m.label, score: matchData.dimensions[m.key], key: m.key }))
+    : [];
+
+  const topDim = dimensions.length > 0
+    ? dimensions.sort((a, b) => b.score - a.score)[0]
+    : null;
+  const insightText = topDim
+    ? (INSIGHT_MAP[topDim.key] || "算法在 5 个维度上找到了你们的共鸣点")
+    : "";
 
   return (
     <PageShell ambientOrbs orbIntensity="light">
@@ -153,14 +237,35 @@ export default function ResultPage() {
               transition={{ duration: 0.5, ease: "easeOut" }}
               className="space-y-12"
             >
+              {loading && (
+                <div className="text-center py-20">
+                  <div className="inline-flex items-center gap-2 text-zinc-400">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-rose-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-400" />
+                    </span>
+                    加载匹配结果中…
+                  </div>
+                </div>
+              )}
+
+              {error && (
+                <div className="text-center py-20 space-y-4">
+                  <p className="text-zinc-400 text-sm">{error}</p>
+                  <button onClick={fetchMatch} className="text-rose-400 text-sm underline underline-offset-4 hover:text-rose-300 transition-colors">
+                    重新加载
+                  </button>
+                </div>
+              )}
+
+              {!loading && !error && matchData && (
+              <>
               <div className="text-center space-y-2">
-                <p className="text-[10px] text-zinc-500 uppercase tracking-[0.3em]">匹配报告 #0032</p>
+                <p className="text-[10px] text-zinc-500 uppercase tracking-[0.3em]">本周匹配报告</p>
                 <h2 className="text-3xl font-black tracking-tight">你们的频率共振</h2>
               </div>
 
-              {/* Score ring + dimension bars */}
               <div className="flex flex-col md:flex-row items-center gap-10 md:gap-14">
-                {/* Ring */}
                 <div className="relative w-40 h-40 flex-shrink-0 flex items-center justify-center">
                   <svg className="absolute w-full h-full -rotate-90" viewBox="0 0 100 100">
                     <circle cx="50" cy="50" r="44" fill="none" stroke="rgb(255 255 255 / 0.04)" strokeWidth="2.5" />
@@ -170,7 +275,7 @@ export default function ResultPage() {
                       stroke="url(#ringGradient)"
                       strokeWidth="2.5"
                       strokeLinecap="round"
-                      strokeDasharray={`${2 * Math.PI * 44 * 0.88} ${2 * Math.PI * 44 * 0.12}`}
+                      strokeDasharray={`${2 * Math.PI * 44 * ((matchData?.score || 0) / 100)} ${2 * Math.PI * 44 * (1 - (matchData?.score || 0) / 100)}`}
                       strokeDashoffset={0}
                       initial={{ pathLength: 0 }}
                       animate={{ pathLength: 1 }}
@@ -191,15 +296,14 @@ export default function ResultPage() {
                       animate={{ opacity: 1 }}
                       transition={{ delay: 0.3 }}
                     >
-                      <AnimatedNumber value={88} />
+                      <AnimatedNumber value={matchData?.score || 0} />
                     </motion.span>
                     <span className="block text-[10px] text-zinc-500 mt-0.5">综合共振</span>
                   </div>
                 </div>
 
-                {/* Dimension bars */}
                 <div className="flex-1 space-y-4 w-full">
-                  {DIMENSIONS.map((d, i) => (
+                  {dimensions.map((d, i) => (
                     <motion.div
                       key={d.label}
                       initial={{ opacity: 0, x: -12 }}
@@ -229,7 +333,6 @@ export default function ResultPage() {
                 </div>
               </div>
 
-              {/* Insight */}
               <motion.div
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -241,7 +344,6 @@ export default function ResultPage() {
                 </p>
               </motion.div>
 
-              {/* Expiry countdown */}
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -253,7 +355,6 @@ export default function ResultPage() {
                 </p>
               </motion.div>
 
-              {/* CTA */}
               <motion.div
                 initial={{ opacity: 0, y: 8 }}
                 animate={{ opacity: 1, y: 0 }}
@@ -265,7 +366,8 @@ export default function ResultPage() {
                 </p>
                 <div className="flex justify-center gap-3">
                   <button
-                    onClick={() => setAction("pass")}
+                    onClick={() => handleAction("pass")}
+                    disabled={action !== "none"}
                     className={`px-6 py-3 rounded-xl text-sm transition-all active:scale-[0.97] ${
                       action === "pass"
                         ? "text-zinc-600 cursor-default"
@@ -275,7 +377,8 @@ export default function ResultPage() {
                     {action === "pass" ? "已跳过，等待下周" : "下次再说"}
                   </button>
                   <button
-                    onClick={() => setAction("connect")}
+                    onClick={() => handleAction("connect")}
+                    disabled={action !== "none"}
                     className={`group px-8 py-3 rounded-xl text-sm font-bold transition-all active:scale-[0.97] ${
                       action === "connect"
                         ? "bg-rose-400/20 border border-rose-400/30 text-rose-200 cursor-default"
@@ -283,16 +386,24 @@ export default function ResultPage() {
                     }`}
                   >
                     <span className="flex items-center gap-2">
-                      {action === "connect" ? "请求已发送" : "建立联系"}
+                      {action === "connect" ? (mutual ? "双方已连接" : "请求已发送") : "建立联系"}
                       <svg className="w-3.5 h-3.5 transition-transform duration-300 group-hover:translate-x-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M13 7l5 5m0 0l-5 5m5-5H6" />
                       </svg>
                     </span>
                   </button>
                 </div>
+                {mutual && (
+                  <motion.p
+                    initial={{ opacity: 0, y: 8 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    className="text-sm text-rose-300 font-light"
+                  >
+                    你们已经建立联系！请查看校园邮箱获取对方联系方式。
+                  </motion.p>
+                )}
               </motion.div>
 
-              {/* Easter egg: long-press on score ring */}
               <div
                 className="flex justify-center mt-4"
                 onMouseDown={() => {
@@ -322,6 +433,8 @@ export default function ResultPage() {
                   )}
                 </AnimatePresence>
               </div>
+              </>
+              )}
             </motion.div>
           )}
         </AnimatePresence>
