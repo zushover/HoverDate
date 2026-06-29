@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useRef, useCallback, Suspense } from "react";
 import { motion, AnimatePresence, useSpring, useTransform } from "framer-motion";
 import { useSearchParams } from "next/navigation";
 import PageShell from "@/components/PageShell";
@@ -54,7 +54,7 @@ const INSIGHT_MAP: Record<string, string> = {
   future: "你们对未来的规划方向一致，这是长期关系的重要基础",
 };
 
-export default function ResultPage() {
+function ResultContent() {
   const searchParams = useSearchParams();
   const emailFromQuery = searchParams.get("email") || (typeof window !== "undefined" ? localStorage.getItem("hoverdate_email") : null);
 
@@ -450,5 +450,13 @@ export default function ResultPage() {
         </a>
       </div>
     </PageShell>
+  );
+}
+
+export default function ResultPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-zinc-500">加载中…</div>}>
+      <ResultContent />
+    </Suspense>
   );
 }
